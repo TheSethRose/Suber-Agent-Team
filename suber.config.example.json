@@ -1,60 +1,39 @@
 {
-  "//": "Suber Agent Team FULL config (every advanced knob). Most people only need 3 fields (baseUrl/apiKey/model) - see suber.settings.example.json for the quick file. Copy THIS to suber.config.json only when you want to tune tiers / rate limits / capabilities. Every field can also be set via SUBER_* env vars (env wins over file). See README.",
+  "//": "Copy to ~/.suber/config.json (mode 600, folder 700). Every field can also be set with a SUBER_* env var, which wins. Keep the API key out of this file: the launcher passes it as SUBER_API_KEY from the Keychain (see README).",
 
-  "//preset": "Optional. 'orbit-anthropic' | 'orbit-openai' | 'orbit-tiered' baked in. A preset only fills defaults; anything you set below overrides it. Use a preset + just add your apiKey to get going in one line.",
-  "preset": "orbit-anthropic",
-
-  "//provider": "'anthropic' (Messages API) or 'openai' (Chat Completions). Works with any compatible gateway, not just Orbit.",
   "provider": "anthropic",
+  "baseUrl": "https://api.anthropic.com",
 
-  "baseUrl": "https://api.orbit-provider.com/anthropic",
-  "apiKey": "sk-orbit-REPLACE_ME",
-
-  "//authStyle": "'bearer' (Authorization: Bearer <key>) or 'x-api-key'. Default: bearer for openai, x-api-key for native api.anthropic.com, bearer otherwise.",
-  "authStyle": "bearer",
-
-  "//tavilyApiKey": "OPTIONAL. A Tavily API key (or env SUBER_TAVILY_API_KEY / TAVILY_API_KEY). When set, every worker gains a web_search tool (query -> ranked results) on top of web_fetch. Leave empty to disable web search.",
-  "tavilyApiKey": "",
-
-  "//model": "The default CHEAP model. Used as the fallback for any tier you do not set in `models`. Your main session model is untouched.",
-  "model": "claude-haiku-4-5",
-
-  "//models": "OPTIONAL heterogeneous tiers (orchestrator-worker power move). scout=cheap breadth (fanout), worker=mid reasoning (delegate), synth=smartest (research lead + map_reduce reduce). With Orbit, ALL tiers bill to Orbit, not your main account. Omit a tier to fall back to `model`.",
+  "//model": "Fallback for any tier left unset.",
+  "model": "claude-sonnet-5-5",
   "models": {
-    "scout": "claude-haiku-4-5",
-    "worker": "claude-sonnet-4-6",
-    "synth": "claude-opus-4-8"
+    "scout": "claude-haiku-5-5",
+    "worker": "claude-sonnet-5-5",
+    "synth": "claude-opus-5-5"
   },
 
-  "maxConcurrency": 8,
-  "//maxIterationsPerAgent": "Tool-loop cap per worker. 6 was too low for multi-file reads; 10 is the new default.",
-  "maxIterationsPerAgent": 10,
-  "//maxTokens": "Response cap for scout/worker turns.",
+  "maxConcurrency": 4,
+  "//maxIterationsPerAgent": "Tool-loop rounds per worker. A big audit can run out at 12; split it or raise this.",
+  "maxIterationsPerAgent": 12,
   "maxTokens": 8192,
-  "//synthMaxTokens": "Response cap for the synth tier (decompose + reduce). Bigger by design.",
   "synthMaxTokens": 16384,
-
-  "//thinkingBudget": "Extended-thinking budget for worker/synth tiers (anthropic only). 0 = off. e.g. 4096 to let the lead/synth plan.",
   "thinkingBudget": 0,
 
-  "//retryAttempts": "Retries on 429/5xx/network (Orbit pools 429 under load). retryBaseMs = exponential backoff base.",
   "retryAttempts": 3,
   "retryBaseMs": 800,
+  "//requestsPerMinute": "Client-side cap so a fan-out self-paces under your API rate limit. 0 = off.",
+  "requestsPerMinute": 0,
+  "requestsPerSecond": 0,
 
-  "//requestsPerMinute": "Client-side rate cap so a big fan-out SELF-PACES under your provider's limits instead of 429-storming. Shared across the fleet, per base URL. 0 = off. Orbit's default limit is 60/min + 15/s, so these sit safely under it. Raise them if you raise your provider's limit; lower them for stricter gateways.",
-  "requestsPerMinute": 55,
-  "requestsPerSecond": 12,
-
-  "//workspaceRoot": "Files the sub-agents may read/grep. Default: the directory the MCP server is launched in (your project root).",
-  "workspaceRoot": ".",
-
-  "//tools": "Read-only scout tools available to every sub-agent. (web_search is added automatically when tavilyApiKey is set.)",
   "tools": ["read_file", "glob", "list_dir", "grep", "web_fetch"],
+  "capabilities": { "write": false, "bash": false },
+  "acknowledgeDangerous": false,
+  "serena": "off",
+  "progress": false,
 
-  "//capabilities": "DANGEROUS. Off by default. Turning either on requires acknowledgeDangerous=true (or env SUBER_ACK_DANGEROUS=1), else it is forced off with a warning. The admin/user owns this decision.",
-  "capabilities": {
-    "write": false,
-    "bash": false
-  },
-  "acknowledgeDangerous": false
+  "//guidance": "Appended to every tool description: when to offload, which folders to use, when to stop.",
+  "guidance": "Use only for read-only, self-contained jobs inside one folder. Always pass workspaceRoot as an absolute path.",
+
+  "//deniedRoots": "Folders workers may never be pointed at, inside, or above. `~/` expands to home.",
+  "deniedRoots": ["~/.ssh", "~/.aws", "~/.gnupg", "~/.config", "~/.claude", "~/.suber", "~/Library"]
 }

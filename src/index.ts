@@ -14,7 +14,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { loadConfig, formatBanner, type FleetConfig } from "./config.js";
 import { createServer } from "./server.js";
-import { disposeAllSerena, setupVision } from "./serena.js";
+import { disposeAllSerena } from "./serena.js";
 import { initProgress, shutdownProgress } from "./progress.js";
 import { runWatch } from "./watch.js";
 
@@ -64,11 +64,6 @@ async function main(): Promise<void> {
   if (argv[0] === "watch") {
     runWatch(argv.slice(1));
     return; // runWatch keeps the process alive until it self-exits
-  }
-  // `setup-vision`: one-command install of Serena (LSP vision) for the fleet. This does NOT
-  // start the MCP server -- it installs Serena via uv, then exits. Kept off the hot path.
-  if (argv.includes("setup-vision") || argv.includes("--setup-vision")) {
-    process.exit(await setupVision());
   }
   // `--check` / `--doctor`: validate config + print the banner, then exit WITHOUT starting
   // the MCP server. A clutter-free way to confirm Suber is installed and configured

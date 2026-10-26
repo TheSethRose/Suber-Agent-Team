@@ -14,7 +14,6 @@
  * every worker in a run (LSP startup is slow -- never one-per-worker). Fail-soft: if Serena
  * is absent or fails to start, workers transparently fall back to the built-in textual tools.
  */
-import { spawn } from "node:child_process";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -129,7 +128,7 @@ export async function getSerenaTools(config: FleetConfig, root: string): Promise
         // Explicitly requested -> say why it didn't attach.
         process.stderr.write(
           `[Suber] Serena vision unavailable: ${msg}\n` +
-            `        Workers fall back to textual tools. Run 'setup-vision' to install Serena.\n`,
+            `        Workers fall back to textual tools. Install Serena (uv tool install serena-agent) to enable it.\n`,
         );
       } else if (process.env.SUBER_SERENA_DEBUG) {
         // auto -> stay silent unless debugging.
@@ -153,54 +152,4 @@ export async function disposeAllSerena(): Promise<void> {
       if (conn) await conn.client.close().catch(() => {});
     }),
   );
-}
-
-// ---------------------------------------------------------------------------
-// `setup-vision` CLI command: one-command install of Serena for the community.
-// Serena is a Python app installed via uv (its official method); there is no single
-// pre-built binary to fetch. We keep this OFF the fleet hot path -- it runs only when
-// the user explicitly invokes it, with full output + consent.
-// ---------------------------------------------------------------------------
-
-/** Run a command inheriting stdio (so the user sees uv's progress). Resolves with the exit code. */
-function runInherit(command: string, args: string[]): Promise<number> {
-  return new Promise((resolve) => {
-    // shell:true so Windows resolves uv/serena shims (.exe/.cmd) via PATHEXT. Args are fixed literals.
-    const child = spawn(command, args, { stdio: "inherit", shell: true });
-    child.on("error", () => resolve(-1));
-    child.on("close", (code) => resolve(code ?? -1));
-  });
-}
-
-/**
- * Install Serena via uv so the fleet gains LSP vision. Returns a process exit code.
- * Human output goes to stderr (this command never starts the MCP server, so stdout is free,
- * but we stay consistent with the rest of Suber).
- */
-export async function setupVision(): Promise<number> {
-  process.stderr.write("\n[Suber] Setting up Serena (semantic LSP vision) for the fleet...\n\n");
-
-  if ((await runInherit("uv", ["--version"])) !== 0) {
-    process.stderr.write(
-      "\n[Suber] `uv` was not found. Serena installs via uv (Astral). Install uv first:\n" +
-        '  Windows : powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"\n' +
-        "  macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh\n" +
-        "Then re-run: suber-agent-team setup-vision\n",
-    );
-    return 1;
-  }
-
-  const code = await runInherit("uv", ["tool", "install", "-p", "3.13", "serena-agent"]);
-  if (code !== 0) {
-    process.stderr.write("\n[Suber] Serena install failed (see uv output above).\n");
-    return code;
-  }
-
-  await runInherit("serena", ["--version"]);
-  process.stderr.write(
-    "\n[Suber] Serena installed. The fleet now gains LSP vision automatically (SUBER_SERENA=auto).\n" +
-      "        Re-launch Suber; workers get find_symbol / get_symbols_overview / find_referencing_symbols, etc.\n" +
-      "        (First use of each language downloads its language server on demand.)\n",
-  );
-  return 0;
 }

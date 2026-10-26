@@ -1,26 +1,23 @@
 {
   "name": "suber-agent-team",
   "version": "0.5.0",
-  "mcpName": "io.github.stephenpham68/suber-agent-team",
-  "description": "Suber Agent Team - a provider-agnostic sub-agent fleet over MCP. Offload hundreds of cheap-model sub-agents (Haiku, GPT-mini, any OpenAI/Anthropic-compatible API or Orbit) so your premium Opus/main account quota stays untouched.",
+  "description": "Hardened fork of Suber Agent Team: a stdio MCP server that offloads read-only research from Claude Code to helper models on an Anthropic Console API key.",
   "type": "module",
   "bin": {
     "suber-agent-team": "dist/index.js"
   },
   "files": [
     "dist",
-    "presets",
     "README.md",
     "LICENSE",
-    "suber.settings.example.json",
     "suber.config.example.json"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "bun run src/index.ts",
     "start": "node dist/index.js",
-    "build:exe": "bun run scripts/build-binaries.ts",
-    "inspector": "npx @modelcontextprotocol/inspector bun run src/index.ts"
+    "inspector": "bunx @modelcontextprotocol/inspector bun run src/index.ts",
+    "check": "tsc --noEmit -p . && bun run scripts/hardening-check.ts"
   },
   "keywords": [
     "mcp",
@@ -31,9 +28,7 @@
     "agent-team",
     "fan-out",
     "token-saving",
-    "anthropic",
-    "openai",
-    "orbit"
+    "anthropic"
   ],
   "license": "MIT",
   "engines": {

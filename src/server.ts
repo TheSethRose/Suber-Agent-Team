@@ -77,7 +77,7 @@ function resolveRoot(config: FleetConfig, wr?: string): string | undefined {
 }
 
 /** Reject a root that is, contains, or sits inside a denied folder (by real path). */
-function assertRootAllowed(config: FleetConfig, root: string): void {
+export function assertRootAllowed(config: FleetConfig, root: string): void {
   let real: string;
   try {
     real = fs.realpathSync(root);

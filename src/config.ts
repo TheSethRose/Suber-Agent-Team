@@ -1,16 +1,13 @@
 /**
  * Suber Agent Team - configuration loading.
  *
- * Precedence (low -> high): DEFAULTS  <  preset  <  config file  <  environment variables.
+ * Precedence (low -> high): DEFAULTS  <  config file  <  environment variables.
  * Every field has a SUBER_* env override so the server works with zero config files.
  */
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import orbitAnthropic from "../presets/orbit-anthropic.json" with { type: "json" };
-import orbitOpenai from "../presets/orbit-openai.json" with { type: "json" };
-import orbitTiered from "../presets/orbit-tiered.json" with { type: "json" };
 
 export type Provider = "anthropic" | "openai";
 export type AuthStyle = "bearer" | "x-api-key";
@@ -123,12 +120,6 @@ export interface FleetConfig {
   /** Non-fatal notes surfaced in the startup banner. */
   warnings: string[];
 }
-
-const PRESETS: Record<string, Partial<FleetConfig>> = {
-  "orbit-anthropic": orbitAnthropic as unknown as Partial<FleetConfig>,
-  "orbit-openai": orbitOpenai as unknown as Partial<FleetConfig>,
-  "orbit-tiered": orbitTiered as unknown as Partial<FleetConfig>,
-};
 
 const SCOUT_TOOLS = ["read_file", "glob", "list_dir", "grep", "web_fetch"];
 
@@ -265,39 +256,28 @@ function locateConfigFile(): Record<string, unknown> | undefined {
 export function loadConfig(): FleetConfig {
   const fileCfg = locateConfigFile() ?? {};
 
-  const presetName = envStr("SUBER_PRESET") ?? (fileCfg["preset"] as string | undefined);
-  const preset = presetName ? PRESETS[presetName] : undefined;
-  if (presetName && !preset) {
-    throw new Error(
-      `Unknown preset '${presetName}'. Available: ${Object.keys(PRESETS).join(", ")}`,
-    );
-  }
 
   const warnings: string[] = [];
 
-  // ---- scalar merge (defaults < preset < file < env) ----
+  // ---- scalar merge (defaults < file < env) ----
   const provider = (envStr("SUBER_PROVIDER") ??
     (fileCfg["provider"] as string | undefined) ??
-    preset?.provider ??
     "anthropic") as Provider;
 
   const baseUrl = (envStr("SUBER_BASE_URL") ??
     (fileCfg["baseUrl"] as string | undefined) ??
-    preset?.baseUrl ??
     "").replace(/\/+$/, "");
 
   const apiKey =
     envStr("SUBER_API_KEY") ??
     (fileCfg["apiKey"] as string | undefined) ??
-    preset?.apiKey ??
     envStr("ANTHROPIC_AUTH_TOKEN") ??
     envStr("ANTHROPIC_API_KEY") ??
     envStr("OPENAI_API_KEY") ??
     "";
 
   let authStyle = (envStr("SUBER_AUTH_STYLE") ??
-    (fileCfg["authStyle"] as string | undefined) ??
-    preset?.authStyle) as AuthStyle | undefined;
+    (fileCfg["authStyle"] as string | undefined)) as AuthStyle | undefined;
   if (!authStyle) {
     authStyle = provider === "anthropic" && /api\.anthropic\.com/i.test(baseUrl) ? "x-api-key" : "bearer";
   }
@@ -305,7 +285,6 @@ export function loadConfig(): FleetConfig {
   const anthropicVersion =
     envStr("SUBER_ANTHROPIC_VERSION") ??
     (fileCfg["anthropicVersion"] as string | undefined) ??
-    preset?.anthropicVersion ??
     "2023-06-01";
 
   const tavilyApiKey =
@@ -317,14 +296,12 @@ export function loadConfig(): FleetConfig {
   const model =
     envStr("SUBER_MODEL") ??
     (fileCfg["model"] as string | undefined) ??
-    preset?.model ??
     "";
 
   // ---- model tiers (each falls back to the single `model`) ----
   const fileModels = (fileCfg["models"] as Partial<ModelTiers> | undefined) ?? {};
-  const presetModels = (preset?.models as Partial<ModelTiers> | undefined) ?? {};
   const resolveTier = (envKey: string, key: keyof ModelTiers): string =>
-    envStr(envKey) ?? fileModels[key] ?? presetModels[key] ?? model;
+    envStr(envKey) ?? fileModels[key] ?? model;
   const models: ModelTiers = {
     scout: resolveTier("SUBER_MODEL_SCOUT", "scout"),
     worker: resolveTier("SUBER_MODEL_WORKER", "worker"),
@@ -355,12 +332,10 @@ export function loadConfig(): FleetConfig {
   const requestsPerMinute =
     envNum("SUBER_RPM") ??
     (fileCfg["requestsPerMinute"] as number | undefined) ??
-    preset?.requestsPerMinute ??
     0;
   const requestsPerSecond =
     envNum("SUBER_RPS") ??
     (fileCfg["requestsPerSecond"] as number | undefined) ??
-    preset?.requestsPerSecond ??
     0;
 
   const rootRaw =
@@ -449,7 +424,7 @@ export function loadConfig(): FleetConfig {
   if (missing.length) {
     throw new Error(
       `Missing required config: ${missing.join(", ")}.\n` +
-        `Set them in suber.config.json, via a preset, or SUBER_* env vars. See suber.config.example.json.`,
+        `Set them in ~/.suber/config.json or SUBER_* env vars. See suber.config.example.json.`,
     );
   }
 
