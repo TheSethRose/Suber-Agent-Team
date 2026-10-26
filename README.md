@@ -19,14 +19,15 @@ the main conversation.
 
 Each worker gets `read_file`, `glob`, `list_dir`, `grep` and `web_fetch`, jailed to one folder.
 
-- **`delegate(task)`**: one job, one worker (default tier `worker`).
+- **`delegate(task)`**: one job, one worker (default tier `scout`; pass `tier: "worker"` for harder reasoning).
 - **`fanout(tasks[])`**: independent jobs in parallel (default tier `scout`).
 - **`map_reduce(items[], mapPrompt, reducePrompt)`**: one question over many files or URLs, then
   one `synth` worker combines the answers.
 - **`research(objective)`**: a `synth` lead splits the question, scouts gather, `synth` writes a
   cited answer.
 
-Every result ends with a footer showing the model, tool calls and tokens billed to the key.
+Every result ends with a footer showing the models, tool calls and tokens billed to the key,
+including cache reads and writes.
 
 Workers can't see your conversation, edit files, run commands or search the web. Brief them
 with paths or URLs, a done condition and a length cap. Each worker gets a fixed number of tool
@@ -47,6 +48,10 @@ rounds (`maxIterationsPerAgent`), so split a big audit into narrow pieces rather
   real path on every call, including the default root.
 - **`guidance`.** Your own usage rules, appended to every tool description, so the model sees
   them each time it decides whether to offload.
+- **Prompt caching.** Each worker's system prompt and history are cached between its turns, so
+  a later turn pays about a tenth of the input price for everything it has already seen.
+- **Usage log.** Every tool call appends its token usage to `~/.suber/usage.jsonl`;
+  `bun run src/index.ts usage [--days N]` totals it by model and day, with a spend estimate.
 - **Trimmed.** Orbit presets, standalone binary builds and MCP registry metadata are gone.
 
 Write and bash tools still exist but stay off unless you set both `capabilities` and
@@ -115,7 +120,11 @@ Every field also has a `SUBER_*` environment variable, which wins over the file.
 | `maxConcurrency` | `SUBER_MAX_CONCURRENCY` | Parallel workers (default 8) |
 | `maxIterationsPerAgent` | `SUBER_MAX_ITERATIONS` | Tool-loop rounds per worker (default 10) |
 | `maxTokens`, `synthMaxTokens` | `SUBER_MAX_TOKENS`, `SUBER_SYNTH_MAX_TOKENS` | Response caps |
-| `thinkingBudget` | `SUBER_THINKING_BUDGET` | Extended thinking for worker and synth (0 = off) |
+| `promptCaching` | `SUBER_PROMPT_CACHING` | Cache system prompt and history (default on); history is then kept whole |
+| `toolResultWindow` | `SUBER_TOOL_RESULT_WINDOW` | Recent tool results kept verbatim when caching is off (default 3) |
+| `usageLog` | `SUBER_USAGE_LOG` | Per-call usage JSONL (default `~/.suber/usage.jsonl`; `""` = off) |
+| `pricing` | none | USD per million tokens by model, merged over the built-in table |
+| `thinkingBudget` | `SUBER_THINKING_BUDGET` | Leave at 0: it sends `budget_tokens`, which the 5.5 models reject |
 | `requestsPerMinute`, `requestsPerSecond` | `SUBER_RPM`, `SUBER_RPS` | Client-side rate cap (0 = off) |
 | `workspaceRoot` | `SUBER_WORKSPACE_ROOT` | Default root (the launch folder); pass one per call instead |
 | `deniedRoots` | `SUBER_DENIED_ROOTS` | Comma-separated in env; `~/` expands to home |

@@ -3,7 +3,7 @@
  * so it adds minimal schema overhead to the orchestrator's context. Each tool runs the
  * fleet on the cheap provider and returns concise text + a "tokens offloaded" footer.
  *
- * Model tiers: delegate -> worker, fanout -> scout, map_reduce -> scout map + synth reduce,
+ * Model tiers: delegate -> scout, fanout -> scout, map_reduce -> scout map + synth reduce,
  * research -> synth lead + scout workers + synth synthesis. An explicit `model` (or `tier`)
  * always overrides the default.
  */
@@ -23,6 +23,7 @@ import {
   type FleetAgentResult,
 } from "./agent.js";
 import { emit, progressOn, type ProgressContext } from "./progress.js";
+import { logUsage } from "./usage.js";
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -109,13 +110,18 @@ const rootSchema = z
       "Folders in the configured deniedRoots (and any folder above one) are refused.",
   );
 
-function footer(config: FleetConfig, model: string, results: FleetAgentResult[]): string {
+/** Usage footer for a finished tool call. Also appends the call to the usage log. */
+function footer(config: FleetConfig, tool: string, results: FleetAgentResult[]): string {
+  logUsage(config.usageLog, tool, results.map((r) => r.usage));
   const s = summarize(results);
   const fallback = s.textToolFallback ? " · text-tool fallback (no native tool_use on this endpoint)" : "";
+  const cached = s.cacheReadTokens || s.cacheWriteTokens
+    ? ` (+${s.cacheReadTokens} cache read, ${s.cacheWriteTokens} cache write)`
+    : "";
   return (
-    `\n\n---\n[Suber] ${s.count} worker(s) on '${model}' (${config.provider}) · ` +
+    `\n\n---\n[Suber] ${s.count} worker(s) on ${s.models.map((m) => `'${m}'`).join(", ")} (${config.provider}) · ` +
     `${s.ok} ok / ${s.failed} failed · ${s.toolCalls} tool calls · ` +
-    `~${s.inputTokens} in / ${s.outputTokens} out tokens billed to your FLEET provider, ` +
+    `~${s.inputTokens} in${cached} / ${s.outputTokens} out tokens billed to your FLEET provider, ` +
     `not your main account${fallback}.`
   );
 }
@@ -146,7 +152,7 @@ export function createServer(config: FleetConfig): McpServer {
     {
       title: "Delegate one task to a cheap-model worker",
       description:
-        "Delegate ONE task to a single autonomous worker running on a CHEAP model (default tier: worker). " +
+        "Delegate ONE task to a single autonomous worker running on a CHEAP model (default tier: scout; pass tier 'worker' for harder reasoning). " +
         "The worker uses tools (read/grep/glob/web) to gather evidence itself, so context-heavy grunt " +
         "work never touches your main account quota. Returns a concise result." + guidance,
       inputSchema: {
@@ -162,7 +168,7 @@ export function createServer(config: FleetConfig): McpServer {
       emit({ kind: "run_start", runId, runKind: "delegate", title: task.slice(0, 100) });
       let runOk = false;
       try {
-        const p = resolveTier(config, tier ?? "worker", model);
+        const p = resolveTier(config, tier ?? "scout", model);
         const r = await runSingle(config, task, {
           model: p.model,
           sharedContext: context,
@@ -173,7 +179,7 @@ export function createServer(config: FleetConfig): McpServer {
         });
         runOk = r.ok;
         const body = r.ok ? r.text || "[empty result]" : `ERROR: ${r.error}`;
-        return text(body + footer(config, p.model, [r]), !r.ok);
+        return text(body + footer(config, "delegate", [r]), !r.ok);
       } catch (e) {
         return text(`Suber error: ${(e as Error).message}`, true);
       } finally {
@@ -213,7 +219,7 @@ export function createServer(config: FleetConfig): McpServer {
           progress: ctx(runId, "scout"),
         });
         runOk = results.some((r) => r.ok);
-        return text(renderResults(results) + footer(config, p.model, results));
+        return text(renderResults(results) + footer(config, "fanout", results));
       } catch (e) {
         return text(`Suber error: ${(e as Error).message}`, true);
       } finally {
@@ -251,7 +257,7 @@ export function createServer(config: FleetConfig): McpServer {
         });
         runOk = reduced.ok;
         const body = reduced.ok ? reduced.text || "[empty result]" : `ERROR: ${reduced.error}`;
-        return text(body + footer(config, reduceModel ?? config.models.synth, [...mapped, reduced]), !reduced.ok);
+        return text(body + footer(config, "map_reduce", [...mapped, reduced]), !reduced.ok);
       } catch (e) {
         return text(`Suber error: ${(e as Error).message}`, true);
       } finally {
@@ -312,8 +318,7 @@ export function createServer(config: FleetConfig): McpServer {
           `Objective: ${r.objective}\n\n` +
           `Plan (${r.plan.length} subtasks${r.lead.ok ? "" : "; lead decomposition FAILED, ran objective directly"}):\n${planLines}\n\n---\n`;
         const body = r.synthesis.ok ? r.synthesis.text || "[empty synthesis]" : `ERROR: ${r.synthesis.error}`;
-        const model = synthModel ?? config.models.synth;
-        return text(header + body + footer(config, model, all), !r.synthesis.ok);
+        return text(header + body + footer(config, "research", all), !r.synthesis.ok);
       } catch (e) {
         return text(`Suber error: ${(e as Error).message}`, true);
       } finally {

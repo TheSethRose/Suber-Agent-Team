@@ -8,6 +8,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
+import { DEFAULT_PRICING, type ModelPrice } from "./usage.js";
+
 
 export type Provider = "anthropic" | "openai";
 export type AuthStyle = "bearer" | "x-api-key";
@@ -91,6 +93,12 @@ export interface FleetConfig {
    * 0 disables compaction (keep everything verbatim).
    */
   toolResultWindow: number;
+  /** Anthropic prompt caching (default on). Turns off `toolResultWindow` elision, which would break the cache. */
+  promptCaching: boolean;
+  /** JSONL file that gets one line of token usage per MCP tool call. "" disables it. */
+  usageLog: string;
+  /** USD per million tokens by model, for `suber usage` estimates. Merged over the built-in table. */
+  pricing: Record<string, ModelPrice>;
   /** Response token cap for scout/worker turns. */
   maxTokens: number;
   /** Response token cap for the synth tier (decompose + reduce). Bigger by design. */
@@ -318,6 +326,12 @@ export function loadConfig(): FleetConfig {
   const toolResultWindowRaw =
     envNum("SUBER_TOOL_RESULT_WINDOW") ?? (fileCfg["toolResultWindow"] as number | undefined);
   const toolResultWindow = toolResultWindowRaw === undefined ? 3 : Math.max(0, Math.floor(toolResultWindowRaw));
+  const promptCaching =
+    envBool("SUBER_PROMPT_CACHING") ?? (fileCfg["promptCaching"] as boolean | undefined) ?? true;
+  const usageLogRaw =
+    envStr("SUBER_USAGE_LOG") ?? (fileCfg["usageLog"] as string | undefined) ?? "~/.suber/usage.jsonl";
+  const usageLog = usageLogRaw.startsWith("~/") ? path.join(os.homedir(), usageLogRaw.slice(2)) : usageLogRaw;
+  const pricing = { ...DEFAULT_PRICING, ...((fileCfg["pricing"] as Record<string, ModelPrice> | undefined) ?? {}) };
   const maxTokens = envNum("SUBER_MAX_TOKENS") ?? (fileCfg["maxTokens"] as number | undefined) ?? 8192;
   const synthMaxTokens =
     envNum("SUBER_SYNTH_MAX_TOKENS") ??
@@ -441,6 +455,9 @@ export function loadConfig(): FleetConfig {
     maxIterationsPerAgent,
     maxToolResultChars,
     toolResultWindow,
+    promptCaching,
+    usageLog,
+    pricing,
     maxTokens,
     synthMaxTokens,
     thinkingBudget,
@@ -484,6 +501,7 @@ export function formatBanner(config: FleetConfig): string {
   } else {
     lines.push(`    fleet model  : ${config.model}   <- workers run here, NOT your main account`);
   }
+  lines.push(`    caching      : ${config.promptCaching ? "on" : "off"}   usage log: ${config.usageLog || "off"}`);
   lines.push(`    concurrency  : ${config.maxConcurrency}   max iters/agent: ${config.maxIterationsPerAgent}`);
   lines.push(
     `    tokens       : worker=${config.maxTokens} synth=${config.synthMaxTokens}` +
@@ -491,7 +509,9 @@ export function formatBanner(config: FleetConfig): string {
   );
   lines.push(
     `    token thrift : tool-result cap=${config.maxToolResultChars}ch · ` +
-      (config.toolResultWindow > 0
+      (config.promptCaching && config.provider === "anthropic"
+        ? "history kept whole for the prompt cache"
+        : config.toolResultWindow > 0
         ? `keep last ${config.toolResultWindow} verbatim, elide older`
         : "history compaction OFF"),
   );

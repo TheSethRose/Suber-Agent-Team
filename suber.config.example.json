@@ -9,8 +9,15 @@
   "models": {
     "scout": "claude-haiku-5-5",
     "worker": "claude-sonnet-5-5",
-    "synth": "claude-opus-5-5"
+    "synth": "claude-sonnet-5-5"
   },
+
+  "//promptCaching": "Caches the system prompt and each worker's history between its turns. Keeps history whole, so toolResultWindow only applies when this is off.",
+  "promptCaching": true,
+  "//usageLog": "One JSONL line of token usage per tool call; read it with `bun run src/index.ts usage`. \"\" turns it off.",
+  "usageLog": "~/.suber/usage.jsonl",
+  "//pricing": "Optional USD per million tokens by model, merged over the built-in table, for usage estimates.",
+  "pricing": {},
 
   "maxConcurrency": 4,
   "//maxIterationsPerAgent": "Tool-loop rounds per worker. A big audit can run out at 12; split it or raise this.",

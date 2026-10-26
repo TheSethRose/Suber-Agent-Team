@@ -10,6 +10,7 @@
  */
 import type { FleetConfig } from "./config.js";
 import { createProvider, type ProviderClient } from "./providers.js";
+import { byModel, emptyUsage, type Usage } from "./usage.js";
 import { buildToolset, type AgentTool } from "./tools.js";
 import { getSerenaTools } from "./serena.js";
 import { emit, summarizeArgs, summarizeResult, type ProgressContext, type ToolHooks } from "./progress.js";
@@ -76,7 +77,7 @@ export interface FleetAgentResult {
   iterations: number;
   toolCalls: number;
   textToolFallback: boolean;
-  usage: { inputTokens: number; outputTokens: number };
+  usage: Usage;
 }
 
 export interface FleetOptions {
@@ -167,7 +168,7 @@ async function runOne(
       iterations: 0,
       toolCalls: 0,
       textToolFallback: false,
-      usage: { inputTokens: 0, outputTokens: 0 },
+      usage: emptyUsage(model),
     };
   }
   if (pc) {
@@ -425,7 +426,7 @@ export async function runResearch(
   } catch (e) {
     lead = {
       index: 0, task: "[lead] decompose", ok: false, text: "", error: (e as Error).message,
-      iterations: 0, toolCalls: 0, textToolFallback: false, usage: { inputTokens: 0, outputTokens: 0 },
+      iterations: 0, toolCalls: 0, textToolFallback: false, usage: emptyUsage(synthModel),
     };
   }
 
@@ -518,12 +519,16 @@ export async function runResearch(
 export function summarize(results: FleetAgentResult[]) {
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheWriteTokens = 0;
+  let cacheReadTokens = 0;
   let toolCalls = 0;
   let ok = 0;
   let textToolFallback = false;
   for (const r of results) {
     inputTokens += r.usage.inputTokens;
     outputTokens += r.usage.outputTokens;
+    cacheWriteTokens += r.usage.cacheWriteTokens;
+    cacheReadTokens += r.usage.cacheReadTokens;
     toolCalls += r.toolCalls;
     if (r.ok) ok++;
     if (r.textToolFallback) textToolFallback = true;
@@ -531,6 +536,9 @@ export function summarize(results: FleetAgentResult[]) {
   return {
     inputTokens,
     outputTokens,
+    cacheWriteTokens,
+    cacheReadTokens,
+    models: byModel(results.map((r) => r.usage)).map((u) => u.model),
     toolCalls,
     ok,
     failed: results.length - ok,

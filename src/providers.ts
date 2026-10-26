@@ -15,6 +15,7 @@ import type { AgentTool } from "./tools.js";
 import type { ToolHooks } from "./progress.js";
 import { parseTextToolCalls, stripToolMarkup, hasToolCallMarkup, type ParsedCall } from "./tool-call-parse.js";
 import { getRateLimiter, type RateLimiter } from "./rate-limiter.js";
+import { emptyUsage, type Usage } from "./usage.js";
 
 export interface RunAgentInput {
   system: string;
@@ -38,7 +39,7 @@ export interface RunAgentResult {
   /** Why the loop ended: "end" = the model returned a final answer; "max_iterations" = it ran out
    *  of turns (the result is incomplete -- callers should treat it as a failure, not a real answer). */
   stopReason: "end" | "max_iterations";
-  usage: { inputTokens: number; outputTokens: number };
+  usage: Usage;
 }
 
 export interface ProviderClient {
@@ -237,6 +238,20 @@ abstract class BaseClient {
   }
 }
 
+const EPHEMERAL = { type: "ephemeral" } as const;
+
+/**
+ * Copy of `messages` with a cache breakpoint on the last block. Only the request copy carries it:
+ * leaving markers on older messages would burn the 4-breakpoint limit, and the API already finds
+ * the previous turn's entry by looking back from the newest breakpoint.
+ */
+function withTailBreakpoint(messages: any[]): any[] {
+  const last = messages[messages.length - 1];
+  const blocks: any[] = typeof last.content === "string" ? [{ type: "text", text: last.content }] : [...last.content];
+  blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: EPHEMERAL };
+  return [...messages.slice(0, -1), { ...last, content: blocks }];
+}
+
 export class AnthropicClient extends BaseClient implements ProviderClient {
   private headers(): Record<string, string> {
     const h: Record<string, string> = { "anthropic-version": this.config.anthropicVersion };
@@ -254,13 +269,14 @@ export class AnthropicClient extends BaseClient implements ProviderClient {
     const sys = system + buildToolProtocol(tools);
     const knownTools = tools.map((t) => t.name);
     const messages: any[] = [{ role: "user", content: prompt }];
-    const usage = { inputTokens: 0, outputTokens: 0 };
+    const usage = emptyUsage(model);
     let toolCalls = 0;
     let iterations = 0;
     let textToolFallback = false;
     let malformedNudges = 0;
 
     const think = (thinkingBudget ?? 0) > 0;
+    const cache = this.config.promptCaching;
     // With extended thinking, max_tokens must exceed the thinking budget.
     const cap = maxTokens ?? this.config.maxTokens;
     const finalMaxTokens = think ? Math.max(cap, (thinkingBudget ?? 0) + 2048) : cap;
@@ -269,15 +285,16 @@ export class AnthropicClient extends BaseClient implements ProviderClient {
       iterations++;
       // On the round whose tool results feed the final allowed turn, nudge for an answer.
       const lastChance = iterations >= this.config.maxIterationsPerAgent - 1;
-      // Collapse stale tool results to stubs BEFORE re-sending the history (keeps the last N verbatim).
-      compactHistory(messages, this.config.toolResultWindow, "anthropic");
+      // With caching on, history stays byte-identical so each turn reads the previous turns from
+      // cache; eliding old results in place would rewrite the prefix and turn every read into a write.
+      if (!cache) compactHistory(messages, this.config.toolResultWindow, "anthropic");
       const res = await this.post(
         "/v1/messages",
         {
           model,
           max_tokens: finalMaxTokens,
-          system: sys,
-          messages,
+          system: cache ? [{ type: "text", text: sys, cache_control: EPHEMERAL }] : sys,
+          messages: cache ? withTailBreakpoint(messages) : messages,
           ...(think ? { thinking: { type: "enabled", budget_tokens: thinkingBudget } } : {}),
           ...(apiTools.length ? { tools: apiTools } : {}),
         },
@@ -285,6 +302,8 @@ export class AnthropicClient extends BaseClient implements ProviderClient {
       );
       usage.inputTokens += res.usage?.input_tokens ?? 0;
       usage.outputTokens += res.usage?.output_tokens ?? 0;
+      usage.cacheWriteTokens += res.usage?.cache_creation_input_tokens ?? 0;
+      usage.cacheReadTokens += res.usage?.cache_read_input_tokens ?? 0;
       const content: any[] = res.content ?? [];
       const nativeUses = content.filter((c) => c.type === "tool_use");
       const textOut = content
@@ -376,7 +395,7 @@ export class OpenAIClient extends BaseClient implements ProviderClient {
       { role: "system", content: sys },
       { role: "user", content: prompt },
     ];
-    const usage = { inputTokens: 0, outputTokens: 0 };
+    const usage = emptyUsage(model);
     let toolCalls = 0;
     let iterations = 0;
     let textToolFallback = false;

@@ -21,10 +21,11 @@
 
 ## Architecture Notes
 
-- `src/index.ts`: stdio entry and CLI flags (`--check`, `--version`, `watch`).
+- `src/index.ts`: stdio entry and CLI flags (`--check`, `--version`, `watch`, `usage`).
 - `src/server.ts`: the four MCP tools, the per-call `workspaceRoot` resolution and the `deniedRoots` guard (`assertRootAllowed`).
 - `src/agent.ts`: fleet orchestration and prompts.
-- `src/providers.ts`: per-worker tool loop for the `anthropic` and `openai` wire formats, retries, and the text-tool fallback (`src/tool-call-parse.ts`).
+- `src/providers.ts`: per-worker tool loop for the `anthropic` and `openai` wire formats, prompt caching, retries, and the text-tool fallback (`src/tool-call-parse.ts`).
+- `src/usage.ts`: token accounting, the usage log and the `usage` report. Prices in `DEFAULT_PRICING` are list prices; update them when Anthropic's change.
 - `src/tools.ts`: worker tools and the jail (`resolveInRoot`, `assertSafePattern`, `assertPublicUrl`).
 - `src/config.ts`: config loading (defaults < file < `SUBER_*` env).
 - `src/serena.ts`, `src/progress.ts`, `src/watch.ts`: optional Serena tools and live view, both off by default.
@@ -43,6 +44,7 @@ These invariants are the point of the fork. Don't weaken them, and add a case to
 
 Other rules:
 
+- Prompt caching needs a byte-identical prefix: never edit messages already sent (that's why `compactHistory` is skipped when caching is on), and put cache breakpoints only on the request copy.
 - stdout carries the MCP protocol. Write human-readable output to stderr only.
 - Keep `bun.lock` committed and in sync. The user's Bun config enforces a minimum release age; don't bypass it.
 - Upstream is a single-maintainer project. Read every upstream diff before merging (`git fetch upstream && git log --oneline main..upstream/main`); never merge it blind.

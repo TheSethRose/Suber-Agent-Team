@@ -17,6 +17,7 @@ import { createServer } from "./server.js";
 import { disposeAllSerena } from "./serena.js";
 import { initProgress, shutdownProgress } from "./progress.js";
 import { runWatch } from "./watch.js";
+import { runUsageReport } from "./usage.js";
 
 let exiting = false;
 /**
@@ -61,6 +62,13 @@ async function main(): Promise<void> {
   // `watch`: the live viewer. Tails the progress JSONL and renders the fleet in this terminal.
   // It does NOT start the MCP server (and owns its stdout, so it draws freely). Auto-spawned by
   // the server when progress is on, or run by hand to watch a fleet yourself.
+  // `usage [--days N]`: token and estimated-spend totals from the usage log. No server, no API calls.
+  if (argv[0] === "usage") {
+    process.env.SUBER_API_KEY ||= "unused"; // the report reads only the log; don't demand a key
+    const config = loadConfig();
+    runUsageReport(config.usageLog, config.pricing, argv.slice(1));
+    return;
+  }
   if (argv[0] === "watch") {
     runWatch(argv.slice(1));
     return; // runWatch keeps the process alive until it self-exits
