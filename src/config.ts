@@ -108,6 +108,8 @@ export interface FleetConfig {
   requestsPerMinute: number;
   requestsPerSecond: number;
   workspaceRoot: string;
+  /** Absolute folders workers may never be jailed to or inside (compared by real path). */
+  deniedRoots: string[];
   /** Read-only scout tools exposed to every worker. */
   tools: string[];
   capabilities: Capabilities;
@@ -243,13 +245,11 @@ function locateConfigFile(): Record<string, unknown> | undefined {
     return found;
   }
   // Discovery order (first match wins). The quick 3-field "settings" file
-  // (baseUrl/apiKey/model) sits ABOVE the full "config" file at each scope, so the
-  // everyday hot fields can live in one tiny file - copy suber.settings.example.json.
-  // A 3-field settings file alone satisfies validation; everything else uses defaults.
+  // (baseUrl/apiKey/model) sits ABOVE the full "config" file, so the everyday hot fields
+  // can live in one tiny file - copy suber.settings.example.json.
+  // Hardened: only the user's home scope is searched. Reading suber.*.json from cwd let any
+  // opened project redirect baseUrl (leaking the key), enable bash, or swap the Serena command.
   const candidates = [
-    path.resolve(process.cwd(), "suber.config.local.json"),
-    path.resolve(process.cwd(), "suber.settings.json"),
-    path.resolve(process.cwd(), "suber.config.json"),
     path.join(os.homedir(), ".suber", "settings.json"),
     path.join(os.homedir(), ".suber", "config.json"),
   ];
@@ -365,6 +365,16 @@ export function loadConfig(): FleetConfig {
     envStr("SUBER_WORKSPACE_ROOT") ?? (fileCfg["workspaceRoot"] as string | undefined) ?? ".";
   const workspaceRoot = path.resolve(process.cwd(), rootRaw);
 
+  // Folders no worker may ever be jailed to (or inside). Checked against real paths, so a
+  // symlink or per-call workspaceRoot override cannot reach them. `~/` expands to home.
+  const deniedEnv = envStr("SUBER_DENIED_ROOTS");
+  const deniedRaw = deniedEnv
+    ? deniedEnv.split(",").map((t) => t.trim()).filter(Boolean)
+    : ((fileCfg["deniedRoots"] as string[] | undefined) ?? []);
+  const deniedRoots = deniedRaw.map((p) =>
+    path.resolve(p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p),
+  );
+
   const toolsEnv = envStr("SUBER_TOOLS");
   const tools = toolsEnv
     ? toolsEnv.split(",").map((t) => t.trim()).filter(Boolean)
@@ -398,7 +408,8 @@ export function loadConfig(): FleetConfig {
       ? (serenaObj["mode"] ?? serenaObj["enabled"])
       : serenaFileRaw;
   const serenaMode: SerenaMode =
-    parseSerenaMode(envStr("SUBER_SERENA")) ?? parseSerenaMode(serenaFileScalar) ?? "auto";
+    // Hardened: off unless asked for, so Suber never spawns an external process on its own.
+    parseSerenaMode(envStr("SUBER_SERENA")) ?? parseSerenaMode(serenaFileScalar) ?? "off";
   const serenaCommand =
     envStr("SUBER_SERENA_COMMAND") ?? (serenaObj["command"] as string | undefined) ?? "serena";
   const serenaContext =
@@ -461,6 +472,7 @@ export function loadConfig(): FleetConfig {
     requestsPerMinute,
     requestsPerSecond,
     workspaceRoot,
+    deniedRoots,
     tools,
     capabilities,
     acknowledgeDangerous: ack,

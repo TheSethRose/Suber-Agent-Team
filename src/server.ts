@@ -60,7 +60,10 @@ function resolveTier(config: FleetConfig, tier: Tier, explicit?: string) {
  * friendly error if the target does not exist or is not a directory.
  */
 function resolveRoot(config: FleetConfig, wr?: string): string | undefined {
-  if (!wr) return undefined;
+  if (!wr) {
+    assertRootAllowed(config, config.workspaceRoot);
+    return undefined;
+  }
   const abs = path.isAbsolute(wr) ? wr : path.resolve(config.workspaceRoot, wr);
   let st: fs.Stats;
   try {
@@ -69,7 +72,32 @@ function resolveRoot(config: FleetConfig, wr?: string): string | undefined {
     throw new Error(`workspaceRoot '${wr}' does not exist (resolved: ${abs}).`);
   }
   if (!st.isDirectory()) throw new Error(`workspaceRoot '${wr}' is not a directory (resolved: ${abs}).`);
-  return abs;
+  assertRootAllowed(config, abs);
+  return fs.realpathSync(abs);
+}
+
+/** Reject a root that is, contains, or sits inside a denied folder (by real path). */
+function assertRootAllowed(config: FleetConfig, root: string): void {
+  let real: string;
+  try {
+    real = fs.realpathSync(root);
+  } catch {
+    real = path.resolve(root);
+  }
+  for (const denied of config.deniedRoots) {
+    let d: string;
+    try {
+      d = fs.realpathSync(denied);
+    } catch {
+      d = denied;
+    }
+    const inside = path.relative(d, real);
+    const contains = path.relative(real, d);
+    const isUnder = (rel: string) => rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+    if (isUnder(inside) || isUnder(contains)) {
+      throw new Error(`workspaceRoot '${root}' is blocked by deniedRoots (${denied}).`);
+    }
+  }
 }
 
 const rootSchema = z
@@ -211,6 +239,7 @@ export function createServer(config: FleetConfig): McpServer {
       emit({ kind: "run_start", runId, runKind: "map_reduce", title: `map ${items.length} → reduce` });
       let runOk = false;
       try {
+        resolveRoot(config); // map workers read the default root, so it must pass deniedRoots too
         const { mapped, reduced } = await runMapReduce(config, items, mapPrompt, reducePrompt, {
           model: mapModel ?? config.models.scout,
           reduceModel: reduceModel ?? config.models.synth,

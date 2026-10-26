@@ -4,7 +4,10 @@
  *
  * All filesystem access is jailed to config.workspaceRoot. Bash is denylist-guarded.
  */
+import fs from "node:fs";
 import fsp from "node:fs/promises";
+import dns from "node:dns/promises";
+import net from "node:net";
 import path from "node:path";
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -73,11 +76,47 @@ const MAX_FILE_BYTES = 1_000_000;
 function resolveInRoot(root: string, p: string): string {
   if (typeof p !== "string" || p.length === 0) throw new Error("path is required");
   const abs = path.resolve(root, p);
+  assertInside(root, abs, p);
+  // Re-check on the real path so a symlink inside the root cannot point outside it.
+  // A path that does not exist yet (write_file) is checked through its nearest real parent.
+  let probe = abs;
+  while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+  assertInside(fs.realpathSync(root), fs.realpathSync(probe), p);
+  return abs;
+}
+
+function assertInside(root: string, abs: string, p: string): void {
   const rel = path.relative(root, abs);
   if (rel !== "" && (rel.startsWith("..") || path.isAbsolute(rel))) {
     throw new Error(`Path '${p}' escapes the workspace root and is not allowed.`);
   }
-  return abs;
+}
+
+/** Glob patterns are resolved against the root, so a parent hop or absolute pattern would leave it. */
+function assertSafePattern(pattern: string): void {
+  if (path.isAbsolute(pattern) || pattern.split(/[\\/]/).includes("..")) {
+    throw new Error(`Pattern '${pattern}' escapes the workspace root and is not allowed.`);
+  }
+}
+
+/**
+ * Refuse URLs whose host resolves to loopback, private, link-local or metadata ranges, so a
+ * prompt-injected worker cannot probe local services (routers, dev servers, cloud metadata).
+ */
+async function assertPublicUrl(raw: string): Promise<void> {
+  const host = new URL(raw).hostname.replace(/^\[|\]$/g, "");
+  const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true });
+  for (const { address } of addrs) {
+    const v4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+    const blocked = net.isIPv4(v4)
+      ? /^(0|10|127)\./.test(v4) ||
+        /^169\.254\./.test(v4) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(v4) ||
+        /^192\.168\./.test(v4) ||
+        /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(v4)
+      : /^(::1?$|f[cd]|fe[89ab])/i.test(address);
+    if (blocked) throw new Error(`URL host '${host}' resolves to a private address and is not allowed.`);
+  }
 }
 
 function stripHtml(html: string): string {
@@ -160,7 +199,14 @@ function globTool(root: string): AgentTool {
     async run(args) {
       const pattern = String(args.pattern ?? "");
       if (!pattern) throw new Error("pattern is required");
-      const files = await glob([pattern], { cwd: root, absolute: false, dot: false, ignore: IGNORE });
+      assertSafePattern(pattern);
+      const files = await glob([pattern], {
+        cwd: root,
+        absolute: false,
+        dot: false,
+        ignore: IGNORE,
+        followSymbolicLinks: false,
+      });
       if (!files.length) return "No files matched.";
       const head = files.slice(0, 500).join("\n");
       return files.length > 500 ? `${head}\n...[${files.length - 500} more matches]` : head;
@@ -245,6 +291,7 @@ function grepTool(root: string): AgentTool {
       const scopePath = typeof args.path === "string" && args.path ? args.path : undefined;
       const scopeGlob = typeof args.glob === "string" && args.glob ? args.glob : undefined;
       if (scopePath) resolveInRoot(root, scopePath); // reject scopes that escape the root
+      if (scopeGlob) assertSafePattern(scopeGlob);
 
       // Fast path: ripgrep, when installed. Falls through to the in-JS scan on miss/error.
       const rg = await ripgrepSearch(root, pattern, { path: scopePath, glob: scopeGlob, maxMatches });
@@ -256,7 +303,7 @@ function grepTool(root: string): AgentTool {
         files = [resolveInRoot(root, scopePath)];
       } else {
         const g = scopeGlob ?? "**/*";
-        files = await glob([g], { cwd: root, absolute: true, dot: false, ignore: IGNORE });
+        files = await glob([g], { cwd: root, absolute: true, dot: false, ignore: IGNORE, followSymbolicLinks: false });
       }
 
       const out: string[] = [];
@@ -301,10 +348,22 @@ function webFetchTool(): AgentTool {
       const url = String(args.url ?? "");
       if (!/^https?:\/\//i.test(url)) throw new Error("url must be an absolute http(s) URL");
       const maxChars = typeof args.maxChars === "number" ? args.maxChars : 8000;
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(20_000),
-        headers: { "user-agent": "suber-agent-team/0.1 (+https://github.com)" },
-      });
+      // Follow redirects by hand so every hop is checked, not just the first URL.
+      let current = url;
+      let res: Response;
+      for (let hop = 0; ; hop++) {
+        await assertPublicUrl(current);
+        res = await fetch(current, {
+          redirect: "manual",
+          signal: AbortSignal.timeout(20_000),
+          headers: { "user-agent": "suber-agent-team/0.1 (+https://github.com)" },
+        });
+        const next = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+        if (!next) break;
+        if (hop >= 5) throw new Error("Too many redirects.");
+        current = new URL(next, current).toString();
+        if (!/^https?:\/\//i.test(current)) throw new Error("Redirect to a non-http(s) URL is not allowed.");
+      }
       const ct = res.headers.get("content-type") ?? "";
       let text = await res.text();
       if (/html/i.test(ct)) text = stripHtml(text);

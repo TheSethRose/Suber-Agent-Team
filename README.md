@@ -1,5 +1,11 @@
 # Suber Agent Team — run hundreds of cheap Claude Code sub-agents without draining your quota
 
+> **Hardened fork.** Changes from upstream: config is read only from `~/.suber/` or `SUBER_CONFIG`
+> (never from the working directory), Serena defaults to off, file access re-checks real paths so
+> symlinks can't leave the root, glob patterns can't use `..`, `web_fetch` refuses private and
+> loopback addresses on every redirect hop, and a `deniedRoots` list blocks folders workers may
+> never be pointed at, inside, or above.
+
 > **A provider-agnostic sub-agent fleet over MCP.** Offload your Claude Code / Cursor / Cline
 > sub-agents to a **cheap model** (Claude Haiku, GPT-mini, DeepSeek, or *any* OpenAI- or
 > Anthropic-compatible API) so a **20–100 agent fan-out** does the grunt work **without
