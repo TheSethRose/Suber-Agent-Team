@@ -29,6 +29,7 @@
 - `src/tools.ts`: worker tools and the jail (`resolveInRoot`, `assertSafePattern`, `assertPublicUrl`).
 - `src/config.ts`: config loading (defaults < file < `SUBER_*` env).
 - `src/serena.ts`, `src/progress.ts`, `src/watch.ts`: optional Serena tools and live view, both off by default.
+- `skills/suber/SKILL.md`: the Claude Code skill for using suber. Keep it in step with tool names, tier defaults and the `usage` command, and keep personal details out of it.
 
 ## Safety and Data Rules
 

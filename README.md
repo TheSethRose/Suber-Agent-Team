@@ -95,16 +95,24 @@ Requires [Bun](https://bun.sh) and Claude Code.
    claude mcp add --scope user suber -- ~/.suber/launch.sh
    ```
 
-6. Check it: `claude mcp get suber` should say Connected.
+6. Link the skill (see below), then check it: `claude mcp get suber` should say Connected.
    `SUBER_API_KEY=fake SUBER_CONFIG=~/.suber/config.json bun run src/index.ts --check` prints the
    resolved config without starting the server.
 
 ## Telling Claude when to use it
 
-Put the rules in two places: your `CLAUDE.md`, so they apply in every session, and the
-`guidance` field, so they show up on the tools themselves. A good rule set offloads only jobs
-that are read-only, self-contained, inside one folder, checkable and big, and always passes an
-absolute `workspaceRoot`. A starting snippet is in [`docs/CLAUDE.snippet.md`](docs/CLAUDE.snippet.md).
+The repo ships a Claude Code skill, [`skills/suber/SKILL.md`](skills/suber/SKILL.md): when to
+offload, which tool and tier to pick, how to brief a worker, and how to check spend. Link it into
+your skills folder so it stays in step with this checkout:
+
+```bash
+ln -s ~/Developer/active/suber/skills/suber ~/.claude/skills/suber
+```
+
+Then add two short pointers, so the decision to offload is always in view: a line or two in your
+`CLAUDE.md` saying when to prefer suber and to load the skill first, and the same in the
+`guidance` field, which shows on the tools themselves. Put anything personal there (credit
+deadlines, preferred folders), not in the skill.
 
 ## Configuration
 
