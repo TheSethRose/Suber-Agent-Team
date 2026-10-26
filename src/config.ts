@@ -110,6 +110,8 @@ export interface FleetConfig {
   workspaceRoot: string;
   /** Absolute folders workers may never be jailed to or inside (compared by real path). */
   deniedRoots: string[];
+  /** Optional usage rules appended to every MCP tool description. */
+  guidance?: string;
   /** Read-only scout tools exposed to every worker. */
   tools: string[];
   capabilities: Capabilities;
@@ -473,6 +475,7 @@ export function loadConfig(): FleetConfig {
     requestsPerSecond,
     workspaceRoot,
     deniedRoots,
+    guidance: envStr("SUBER_GUIDANCE") ?? (fileCfg["guidance"] as string | undefined),
     tools,
     capabilities,
     acknowledgeDangerous: ack,

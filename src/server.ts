@@ -105,7 +105,8 @@ const rootSchema = z
   .optional()
   .describe(
     "Directory the workers may read/grep for THIS call (absolute, or relative to the default root). " +
-      "Use it to research a DIFFERENT repo than the one this session opened in. Default: the launch directory.",
+      "Use it to research a DIFFERENT repo than the one this session opened in. Default: the launch directory. " +
+      "Folders in the configured deniedRoots (and any folder above one) are refused.",
   );
 
 function footer(config: FleetConfig, model: string, results: FleetAgentResult[]): string {
@@ -136,6 +137,9 @@ const tierSchema = z
 
 export function createServer(config: FleetConfig): McpServer {
   const server = new McpServer({ name: "suber-agent-team", version: "0.5.0" });
+  // Per-user usage rules from config, appended to every tool description so the orchestrator
+  // sees them each time it weighs a call (e.g. when to offload, which folders are off-limits).
+  const guidance = config.guidance ? ` ${config.guidance}` : "";
 
   server.registerTool(
     "delegate",
@@ -144,7 +148,7 @@ export function createServer(config: FleetConfig): McpServer {
       description:
         "Delegate ONE task to a single autonomous worker running on a CHEAP model (default tier: worker). " +
         "The worker uses tools (read/grep/glob/web) to gather evidence itself, so context-heavy grunt " +
-        "work never touches your main account quota. Returns a concise result.",
+        "work never touches your main account quota. Returns a concise result." + guidance,
       inputSchema: {
         task: z.string().describe("The task for the worker. Be specific and self-contained."),
         context: z.string().optional().describe("Optional shared background to prepend to the task."),
@@ -185,7 +189,7 @@ export function createServer(config: FleetConfig): McpServer {
       description:
         "Run MANY tasks in parallel, each on its own autonomous cheap-model worker (default tier: scout, " +
         "bounded by maxConcurrency). Each worker uses tools itself. Returns one labeled result per task. " +
-        "Ideal for parallel research/scans/audits at scale without burning your main quota.",
+        "Ideal for parallel research/scans/audits at scale without burning your main quota." + guidance,
       inputSchema: {
         tasks: z.array(z.string()).min(1).describe("List of independent tasks to run in parallel."),
         context: z.string().optional().describe("Optional shared background prepended to every task."),
@@ -225,7 +229,7 @@ export function createServer(config: FleetConfig): McpServer {
       description:
         "Map a prompt over many items in parallel on scout-tier workers, then a single SYNTH-tier worker " +
         "reduces all per-item results into one synthesis. Returns the reduced output. Use when you want a " +
-        "single combined answer over a large list without the orchestrator reading every item.",
+        "single combined answer over a large list without the orchestrator reading every item." + guidance,
       inputSchema: {
         items: z.array(z.string()).min(1).describe("Items to map over (e.g. file paths, URLs, chunks)."),
         mapPrompt: z.string().describe("Instruction applied to EACH item."),
@@ -264,7 +268,7 @@ export function createServer(config: FleetConfig): McpServer {
         "Give ONE objective; Suber runs the orchestrator-worker pattern itself: a SYNTH-tier lead decomposes " +
         "it into independent subtasks, SCOUT-tier workers run them in parallel, then a SYNTH-tier worker " +
         "synthesizes (optionally verifying evidence) into one cited answer. Use this instead of hand-writing " +
-        "N fanout tasks. All work is billed to your fleet provider, not your main account.",
+        "N fanout tasks. All work is billed to your fleet provider, not your main account." + guidance,
       inputSchema: {
         objective: z.string().describe("The research/audit objective in one self-contained sentence or paragraph."),
         context: z.string().optional().describe("Optional shared background (constraints, where to look)."),
